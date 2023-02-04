@@ -17,6 +17,7 @@ const SYSCALL_GET_TIME: usize = 169;
 
 //新增加一些自定义syscall
 const SYSCALL_LOOP:usize = 3001;
+const SYSCALL_TASK:usize = 3002;
 
 mod fs;
 mod process;
@@ -32,6 +33,13 @@ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
         SYSCALL_YIELD => sys_yield(),
         SYSCALL_GET_TIME => sys_get_time(),
         SYSCALL_LOOP => sys_loop(),
+        SYSCALL_TASK => unsafe {
+            println!("[kernel] bengin to run system task");
+            let address = test_fun as *const () as usize;
+            println!("[kernel] get func address {:#x}",address);
+            let fun: fn() = core::mem::transmute(address as * const ());
+            sys_task(fun)
+        },
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }
 }
