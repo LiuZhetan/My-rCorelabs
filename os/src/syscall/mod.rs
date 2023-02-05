@@ -34,10 +34,11 @@ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
         SYSCALL_GET_TIME => sys_get_time(),
         SYSCALL_LOOP => sys_loop(),
         SYSCALL_TASK => unsafe {
-            println!("[kernel] bengin to run system task");
+            /*println!("[kernel] bengin to run system task");
             let address = test_fun as *const () as usize;
             println!("[kernel] get func address {:#x}",address);
-            let fun: fn() = core::mem::transmute(address as * const ());
+            let fun: fn() = core::mem::transmute(address as * const ());*/
+            let fun: fn() = core::mem::transmute(args[0] as * const ());
             sys_task(fun)
         },
         _ => panic!("Unsupported syscall_id: {}", syscall_id),

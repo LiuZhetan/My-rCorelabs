@@ -23,7 +23,7 @@ pub fn sys_get_time() -> isize {
     get_time_ms() as isize
 }
 
-/*unsafe fn enable_interrupt() {
+unsafe fn enable_interrupt() {
     let mut sstatus:usize;
     asm!("csrr {}, sstatus", out(reg) sstatus);
     sstatus = sstatus | (1 << 1);
@@ -36,7 +36,7 @@ unsafe fn disable_interrupt() {
     sstatus = sstatus ^ (1 << 1);
     sstatus = sstatus ^ (1 << 5);
     asm!("csrw sstatus, {}", in(reg) sstatus);
-}*/
+}
 
 pub fn sys_loop() -> isize {
     let mut sstatus:usize;
@@ -76,16 +76,18 @@ pub fn sys_loop() -> isize {
     }
 }
 
-pub fn test_fun() -> (){
+/*pub fn test_fun() -> (){
     loop {
         println!("[kernel] this is a test");
     };
-}
+}*/
 
-pub fn sys_task<F>(fun:F) -> isize
+pub unsafe fn sys_task<F>(fun:F) -> isize
     where F: FnOnce() -> () {
     println!("[kernel] run func");
+    enable_interrupt();
     fun();
+    disable_interrupt();
     println!("[kernel] finish run func");
     0
 }
