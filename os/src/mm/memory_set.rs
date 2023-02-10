@@ -9,13 +9,8 @@ use alloc::sync::Arc;
 use lazy_static::*;
 use crate::sync::UPSafeCell;
 use core::arch::{asm};
-use crate::config::{
-    MEMORY_END,
-    PAGE_SIZE,
-    TRAMPOLINE,
-    TRAP_CONTEXT,
-    USER_STACK_SIZE
-};
+use core::borrow::{Borrow, BorrowMut};
+use crate::config::{MEMORY_END, PAGE_SIZE, PAGE_SIZE_BITS, TRAMPOLINE, TRAP_CONTEXT, USER_STACK_SIZE};
 
 extern "C" {
     fn stext();
@@ -39,6 +34,7 @@ lazy_static! {
 pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
+    mapped_areas:Vec<MapArea>,
 }
 
 impl MemorySet {
@@ -46,6 +42,7 @@ impl MemorySet {
         Self {
             page_table: PageTable::new(),
             areas: Vec::new(),
+            mapped_areas: Vec::new(),
         }
     }
     pub fn token(&self) -> usize {
@@ -60,7 +57,8 @@ impl MemorySet {
             permission,
         ), None);
     }
-    fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
+    /// map and push into memset
+    pub(crate) fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);
         if let Some(data) = data {
             map_area.copy_data(&mut self.page_table, data);
@@ -191,6 +189,58 @@ impl MemorySet {
     }
 }
 
+/// 新增加的方法
+impl MemorySet {
+    pub fn get_page_table(&mut self) -> &mut PageTable {
+        self.page_table.borrow_mut()
+    }
+
+    /// map新的虚拟空间
+    pub(crate) fn mmap_push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
+        map_area.map(&mut self.page_table);
+        if let Some(data) = data {
+            map_area.copy_data(&mut self.page_table, data);
+        }
+        self.mapped_areas.push(map_area);
+    }
+
+    /// 只要虚拟段与areas的任意一个段相交
+    pub fn vir_seg_cross_areas(&self, start:VirtPageNum, end:VirtPageNum) -> bool {
+        //
+        for area in self.mapped_areas {
+            if area.in_vpn_range(start)
+                || area.in_vpn_range(end) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// 只要虚拟段在areas的任意一个段中
+    pub fn vir_seg_in_areas(&self, start:VirtPageNum, end:VirtPageNum) -> Option<(usize,usize)> {
+        let mut start_index = None;
+        let mut end_index = None;
+        for (index,area) in self.mapped_areas.iter().enumerate() {
+            if area.in_vpn_range(start) {
+                start_index = Some(index);
+                break;
+            }
+        }
+        for (index,area) in self.mapped_areas.iter().enumerate() {
+            if area.in_vpn_range(end) {
+                end_index = Some(index);
+                break;
+            }
+        }
+        if (start_index == None) || (end_index == None) {
+            return None
+        }
+        else {
+            return Some((start_index.unwrap(),end_index.unwrap()));
+        }
+    }
+}
+
 pub struct MapArea {
     vpn_range: VPNRange,
     data_frames: BTreeMap<VirtPageNum, FrameTracker>,
@@ -271,6 +321,11 @@ impl MapArea {
             }
             current_vpn.step();
         }
+    }
+
+    // range前闭后开
+    fn in_vpn_range(&self, vpn:VirtPageNum) -> bool {
+        vpn.0 >= self.vpn_range.get_start().0 && vpn.0 < self.vpn_range.get_end().0
     }
 }
 

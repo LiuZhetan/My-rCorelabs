@@ -9,8 +9,10 @@ use lazy_static::*;
 use switch::__switch;
 use task::{TaskControlBlock, TaskStatus};
 use alloc::vec::Vec;
+use core::borrow::{Borrow, BorrowMut};
 
 pub use context::TaskContext;
+use crate::mm::{MapArea, MapPermission, MapType, VirtAddr, VirtPageNum};
 
 pub struct TaskManager {
     num_app: usize,
@@ -121,12 +123,56 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+}
 
-
+/// 新加入的方法
+impl TaskManager {
     /*fn get_current_page_table(&self) {
         let inner = self.inner.exclusive_access();
         inner.tasks[inner.current_task].
     }*/
+
+    fn cross_current_memset(&self, start_vpn:VirtPageNum, end_vpn:VirtPageNum) -> bool{
+        let inner = self.inner.exclusive_access();
+        let current_tcb = &inner.tasks[inner.current_task];
+        current_tcb.memory_set.vir_seg_cross_areas(start_vpn, end_vpn)
+    }
+
+
+    fn in_current_memset(&self, start_vpn:VirtPageNum, end_vpn:VirtPageNum) -> Option<(usize,usize)> {
+        let inner = self.inner.exclusive_access();
+        let current_tcb = &inner.tasks[inner.current_task];
+        current_tcb.memory_set.vir_seg_in_areas(start_vpn, end_vpn)
+    }
+
+    /// 向当前任务的memeset中加入新的段
+    fn current_memset_push(&self, start_va:VirtAddr, end_va:VirtAddr, permission:MapPermission) {
+        let inner = self.inner.exclusive_access();
+        let current_memset = &mut inner.tasks[inner.current_task].memory_set;
+        current_memset.mmap_push(
+            MapArea::new(
+                start_va, end_va,
+                MapType::Framed,
+                permission),
+            None
+        );
+    }
+
+    fn current_memset_unmap(&self, start_va:VirtAddr, end_va:VirtAddr) -> bool {
+        let inner = self.inner.exclusive_access();
+        let current_memset = &mut inner.tasks[inner.current_task].memory_set;
+        let seg_pos = current_memset.vir_seg_in_areas(
+            start_va.floor().into(),
+            end_va.floor().into()
+        );
+        match seg_pos {
+            Some((start_index, end_index)) => {
+
+                true
+            },
+            None => false,
+        }
+    }
 }
 
 pub fn run_first_task() {
@@ -166,3 +212,15 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /*pub fn current_tcb_const() -> &'static TaskControlBlock {
     TASK_MANAGER.get_current_tcb_const()
 }*/
+
+pub fn cross_current_memset(start_vpn:VirtPageNum, end_vpn:VirtPageNum) -> bool {
+    TASK_MANAGER.cross_current_memset(start_vpn, end_vpn)
+}
+
+pub fn in_current_memset(start_vpn:VirtPageNum, end_vpn:VirtPageNum) -> Option<&'static mut MapArea> {
+    TASK_MANAGER.in_current_memset(start_vpn, end_vpn)
+}
+
+pub fn current_memset_push(start_va:VirtAddr, end_va:VirtAddr, permission:MapPermission) {
+    TASK_MANAGER.current_memset_push(start_va,end_va,permission)
+}

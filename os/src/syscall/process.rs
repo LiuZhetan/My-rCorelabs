@@ -23,17 +23,17 @@ pub fn sys_yield() -> isize {
 
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     let _us = get_time_us();
-    println!("[kernel] get_time_us: {}",_us);
+    //println!("[kernel] get_time_us: {}",_us);
     let vir_address:VirtAddr = (_ts as usize).into();
-    println!("[kernel] vir_address: {:#x}",vir_address.0);
+    //println!("[kernel] vir_address: {:#x}",vir_address.0);
     let ppn = PageTable::from_token(current_user_token())
                             .translate(vir_address.floor())
                             .unwrap()
                             .ppn();
-    println!("[kernel] ppn: {:#x}",ppn.0);
+    //println!("[kernel] ppn: {:#x}",ppn.0);
     let phys_address = (ppn.0 << PAGE_SIZE_BITS) + vir_address.page_offset();
-    println!("ppn_offset:{:#x}, page_offset: {:#x}",ppn.0 << PAGE_SIZE_BITS, vir_address.page_offset());
-    println!("[kernel] phys_address: {:#x}",phys_address);
+    //println!("ppn_offset:{:#x}, page_offset: {:#x}",ppn.0 << PAGE_SIZE_BITS, vir_address.page_offset());
+    //println!("[kernel] phys_address: {:#x}",phys_address);
     let ts = phys_address as *mut TimeVal;
     unsafe {
         *ts = TimeVal {
