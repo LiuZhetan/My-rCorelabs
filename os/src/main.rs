@@ -23,6 +23,8 @@ mod timer;
 mod sync;
 mod mm;
 
+use core::arch::{global_asm};
+
 global_asm!(include_str!("entry.asm"));
 global_asm!(include_str!("link_app.S"));
 

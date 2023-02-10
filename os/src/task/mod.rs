@@ -22,6 +22,12 @@ struct TaskManagerInner {
     current_task: usize,
 }
 
+/*impl TaskManagerInner {
+    pub fn get_current_tcb_const(&self) -> &TaskControlBlock {
+        self.tasks[self.current_task].borrow()
+    }
+}*/
+
 lazy_static! {
     pub static ref TASK_MANAGER: TaskManager = {
         println!("init TASK_MANAGER");
@@ -115,6 +121,12 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+
+    /*fn get_current_page_table(&self) {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.current_task].
+    }*/
 }
 
 pub fn run_first_task() {
@@ -150,3 +162,7 @@ pub fn current_user_token() -> usize {
 pub fn current_trap_cx() -> &'static mut TrapContext {
     TASK_MANAGER.get_current_trap_cx()
 }
+
+/*pub fn current_tcb_const() -> &'static TaskControlBlock {
+    TASK_MANAGER.get_current_tcb_const()
+}*/
