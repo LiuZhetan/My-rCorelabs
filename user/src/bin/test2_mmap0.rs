@@ -15,13 +15,17 @@ fn main() -> i32 {
     let start: usize = 0x10000000;
     let len: usize = 4096;
     let prot: usize = 3;
+    println!("[test0] try map");
     assert_eq!(0, mmap(start, len, prot));
+    println!("[test0] successfully map");
+    println!("[test0] try write data");
     for i in start..(start + len) {
         let addr: *mut u8 = i as *mut u8;
         unsafe {
             *addr = i as u8;
         }
     }
+    println!("[test0] try read data");
     for i in start..(start + len) {
         let addr: *mut u8 = i as *mut u8;
         unsafe {
