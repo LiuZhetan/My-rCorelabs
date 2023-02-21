@@ -22,6 +22,7 @@ mod task;
 mod timer;
 mod sync;
 mod mm;
+mod tree;
 
 use core::arch::{global_asm};
 

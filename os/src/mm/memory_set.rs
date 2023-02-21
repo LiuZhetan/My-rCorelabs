@@ -10,7 +10,9 @@ use lazy_static::*;
 use crate::sync::UPSafeCell;
 use core::arch::{asm};
 use core::borrow::{Borrow, BorrowMut};
+use core::iter::Map;
 use crate::config::{MEMORY_END, PAGE_SIZE, PAGE_SIZE_BITS, TRAMPOLINE, TRAP_CONTEXT, USER_STACK_SIZE};
+use crate::tree::{Interval, IntervalMap};
 
 extern "C" {
     fn stext();
@@ -31,10 +33,62 @@ lazy_static! {
     )});
 }
 
+#[derive(Copy,Clone)]
+pub struct Segment {
+    low:usize,
+    high:usize,
+}
+
+// 为VPNRange实现Interval trait
+impl Interval for Segment {
+    type Item = usize;
+
+    fn low(&self) -> Self::Item {
+        self.low
+    }
+
+    fn high(&self) -> Self::Item {
+        self.high
+    }
+}
+
+impl Segment {
+    pub fn new(l:usize,h:usize) -> Self {
+        Self {
+            low:l,
+            high:h
+        }
+    }
+
+    pub fn from_vpn(start:VirtPageNum, end:VirtPageNum) -> Self {
+        Self {
+            low:start.0,
+            high:end.0,
+        }
+    }
+
+    pub fn from_range(x:VPNRange) -> Self {
+        Self {
+            low:x.get_start().0,
+            high:x.get_end().0 - 1,
+        }
+    }
+
+    pub fn to_vpn_range(&self) -> VPNRange {
+        VPNRange::new(
+            self.low.into(),
+            (self.high + 1).into()
+        )
+    }
+}
+
 pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
-    mapped_areas:Vec<MapArea>,
+    // 新增加对映射内存的管理
+    //mapped_areas:Vec<MapArea>,
+    mapped_vpn_ranges:IntervalMap<Segment>,
+    mapped_areas:BTreeMap<VirtPageNum,MapArea>
 }
 
 impl MemorySet {
@@ -42,7 +96,8 @@ impl MemorySet {
         Self {
             page_table: PageTable::new(),
             areas: Vec::new(),
-            mapped_areas: Vec::new(),
+            mapped_vpn_ranges: IntervalMap::new(),
+            mapped_areas: BTreeMap::new(),
         }
     }
     pub fn token(&self) -> usize {
@@ -201,43 +256,111 @@ impl MemorySet {
         if let Some(data) = data {
             map_area.copy_data(&mut self.page_table, data);
         }
-        self.mapped_areas.push(map_area);
+        self.mapped_vpn_ranges.interval_insert(Segment::from_range(map_area.vpn_range));
+        self.mapped_areas.insert(map_area.vpn_range.get_start(),map_area);
     }
 
-    /// 只要虚拟段与areas的任意一个段相交
-    pub fn vir_seg_cross_areas(&self, start:VirtPageNum, end:VirtPageNum) -> bool {
-        //
-        for area in self.mapped_areas {
-            if area.in_vpn_range(start)
-                || area.in_vpn_range(end) {
-                return true;
+    pub fn mmap_delete(&mut self, seg:Segment) {
+        let map_area = self.mapped_areas.get_mut(&seg.low.into());
+        match map_area {
+            Some(area) => {
+                self.mapped_vpn_ranges.interval_delete(seg);
+                area.unmap(&mut self.page_table);
+            },
+            _ => {
+                panic!("[kernel] can not delete unmapped area")
             }
         }
-        false
     }
 
-    /// 只要虚拟段在areas的任意一个段中
-    pub fn vir_seg_in_areas(&self, start:VirtPageNum, end:VirtPageNum) -> Option<(usize,usize)> {
-        let mut start_index = None;
-        let mut end_index = None;
-        for (index,area) in self.mapped_areas.iter().enumerate() {
-            if area.in_vpn_range(start) {
-                start_index = Some(index);
-                break;
-            }
+    /// 只要虚拟段与areas的任意一个段重叠就返回重叠的段地址
+    pub fn overlap_segment(&self, start:VirtPageNum, end:VirtPageNum) -> Option<&MapArea> {
+        // 开闭区间问题
+        let res = self.mapped_vpn_ranges.interval_search(
+            Segment::from_vpn(start,end));
+        match res {
+            Some(seg) => {
+                let res = self.search_mmap_area(
+                    seg.low.into()
+                );
+                if res.is_none() {
+                    panic!("[kernel] System Error: unmapped area")
+                }
+                res
+            },
+            None => None
         }
-        for (index,area) in self.mapped_areas.iter().enumerate() {
-            if area.in_vpn_range(end) {
-                end_index = Some(index);
-                break;
-            }
-        }
-        if (start_index == None) || (end_index == None) {
-            return None
+    }
+
+    /// 尝试删除一片区域，只要x中有没有被map的区域就会失败
+    fn delete_segment(&mut self, x: Segment) -> bool {
+        let res = self.mapped_vpn_ranges.interval_search(x);
+        if res.is_none() {
+            return false;
         }
         else {
-            return Some((start_index.unwrap(),end_index.unwrap()));
+            let res = res.unwrap();
+            let x_l = x.low();
+            let x_h = x.high();
+            let res_l = res.low();
+            let res_h = res.high();
+
+            let mut new_l= x_l;
+            let mut new_h = x_h;
+
+            if x_h > res_h {
+                let l= res_h + 1;
+                if self.delete_segment(Segment::new(l,x_h)) {
+                    new_h = res_h;
+                }
+                else {
+                    return false;
+                }
+            }
+
+            if x_l < res_l {
+                let h = res_l - 1;
+                if self.delete_segment(Segment::new(x_l,h)) {
+                    new_l = res_l;
+                }
+                else {
+                    return false;
+                }
+            }
+
+            let new_node = Segment::new(new_l,new_h);
+            /*if new_l == res_l {
+                m.interval_insert(new_node);
+            }
+            else {
+                m.interval_delete(res);
+                m.interval_insert(new_node);
+            }*/
+            let area_to_delete = self.mapped_areas.get_mut(&res_l.into()).unwrap();
+            let perm = area_to_delete.map_perm;
+            let map_type = area_to_delete.map_type;
+            self.mapped_vpn_ranges.interval_delete(res);
+            area_to_delete.unmap(&mut self.page_table);
+            self.mapped_vpn_ranges.interval_insert(new_node);
+            let new_range = new_node.to_vpn_range();
+            let new_area = MapArea::new(
+                new_range.get_start().into(),
+                new_range.get_end().into(),
+                map_type,
+                perm
+            );
+            self.mmap_push(new_area,None);
+            return true;
         }
+    }
+
+    pub fn try_delete_range(&mut self, start:VirtPageNum, end:VirtPageNum) -> bool{
+        let seg = Segment::from_vpn(start,end);
+        self.delete_segment(seg)
+    }
+
+    pub fn search_mmap_area(&self, start_vpn:VirtPageNum) -> Option<&MapArea>{
+        self.mapped_areas.get(&start_vpn)
     }
 }
 
@@ -323,9 +446,13 @@ impl MapArea {
         }
     }
 
-    // range前闭后开
+    /*// range前闭后开
     fn in_vpn_range(&self, vpn:VirtPageNum) -> bool {
         vpn.0 >= self.vpn_range.get_start().0 && vpn.0 < self.vpn_range.get_end().0
+    }*/
+
+    pub fn vpn_range(&self) -> &VPNRange {
+        self.vpn_range.borrow()
     }
 }
 

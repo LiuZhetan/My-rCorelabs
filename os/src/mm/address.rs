@@ -1,6 +1,7 @@
 use crate::config::{PAGE_SIZE, PAGE_SIZE_BITS};
 use super::PageTableEntry;
 use core::fmt::{self, Debug, Formatter};
+use crate::tree::Interval;
 
 const PA_WIDTH_SV39: usize = 56;
 const VA_WIDTH_SV39: usize = 39;
