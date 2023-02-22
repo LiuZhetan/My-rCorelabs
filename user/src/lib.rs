@@ -3,6 +3,8 @@
 #![feature(panic_info_message)]
 #![feature(alloc_error_handler)]
 
+extern crate alloc;
+
 #[macro_use]
 pub mod console;
 mod lang_items;
@@ -62,6 +64,9 @@ pub fn fork() -> isize {
 }
 pub fn exec(path: &str) -> isize {
     sys_exec(path)
+}
+pub fn spawn(path: &str) -> isize {
+    sys_spawn(path)
 }
 pub fn wait(exit_code: &mut i32) -> isize {
     loop {
