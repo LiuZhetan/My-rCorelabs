@@ -12,6 +12,10 @@ use core::cell::RefMut;
 pub struct TaskControlBlock {
     // immutable
     pub pid: PidHandle,
+    // 新增进程优先级
+    pub priority: usize,
+    // 新增stride
+    pub stride: Stride,
     pub kernel_stack: KernelStack,
     // mutable
     inner: UPSafeCell<TaskControlBlockInner>,

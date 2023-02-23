@@ -105,3 +105,13 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     }
     // ---- release current PCB lock automatically
 }
+
+pub fn sys_set_priority(prio: isize) -> isize{
+    if prio >= 2 {
+        
+        prio
+    }
+    else { 
+        -1
+    }
+}

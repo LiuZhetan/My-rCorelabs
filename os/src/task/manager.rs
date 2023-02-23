@@ -1,12 +1,14 @@
 //!Implementation of [`TaskManager`]
 use super::TaskControlBlock;
 use crate::sync::UPSafeCell;
-use alloc::collections::VecDeque;
+use alloc::collections::{BinaryHeap};
 use alloc::sync::Arc;
 use lazy_static::*;
 ///A array of `TaskControlBlock` that is thread-safe
 pub struct TaskManager {
-    ready_queue: VecDeque<Arc<TaskControlBlock>>,
+    //ready_queue: VecDeque<Arc<TaskControlBlock>>,
+    // 使用最小堆实现等待队列
+    ready_queue: BinaryHeap<Arc<TaskControlBlock>>
 }
 
 /// A simple FIFO scheduler.
@@ -14,7 +16,7 @@ impl TaskManager {
     ///Creat an empty TaskManager
     pub fn new() -> Self {
         Self {
-            ready_queue: VecDeque::new(),
+            ready_queue: BinaryHeap::new(),
         }
     }
     ///Add a task to `TaskManager`

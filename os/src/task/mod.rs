@@ -21,6 +21,7 @@ mod processor;
 mod switch;
 #[allow(clippy::module_inception)]
 mod task;
+mod schedule;
 
 use crate::loader::get_app_data_by_name;
 use alloc::sync::Arc;
