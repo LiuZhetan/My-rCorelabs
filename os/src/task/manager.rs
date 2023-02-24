@@ -21,11 +21,13 @@ impl TaskManager {
     }
     ///Add a task to `TaskManager`
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
-        self.ready_queue.push_back(task);
+        //self.ready_queue.push_back(task);
+        self.ready_queue.push(task)
     }
     ///Remove the first task and return it,or `None` if `TaskManager` is empty
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        //self.ready_queue.pop_front()
+        self.ready_queue.pop()
     }
 }
 

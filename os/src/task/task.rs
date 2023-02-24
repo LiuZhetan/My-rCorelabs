@@ -8,20 +8,22 @@ use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefMut;
+use core::cmp::Ordering;
+use crate::task::schedule::Stride;
 
 pub struct TaskControlBlock {
     // immutable
     pub pid: PidHandle,
-    // 新增进程优先级
-    pub priority: usize,
-    // 新增stride
-    pub stride: Stride,
     pub kernel_stack: KernelStack,
     // mutable
     inner: UPSafeCell<TaskControlBlockInner>,
 }
 
 pub struct TaskControlBlockInner {
+    // 新增进程优先级
+    pub priority: u8,
+    // 新增stride
+    pub stride: Stride,
     pub trap_cx_ppn: PhysPageNum,
     pub base_size: usize,
     pub task_cx: TaskContext,
@@ -30,6 +32,49 @@ pub struct TaskControlBlockInner {
     pub parent: Option<Weak<TaskControlBlock>>,
     pub children: Vec<Arc<TaskControlBlock>>,
     pub exit_code: i32,
+}
+
+// 为TCB实现比较,使得其符合最小堆要求
+impl Eq for TaskControlBlock {}
+
+impl Ord for TaskControlBlock {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+impl PartialEq<Self> for TaskControlBlock {
+    fn eq(&self, other: &Self) -> bool {
+        let stride_self = self.inner.exclusive_access().stride;
+        let stride_other = other.inner.exclusive_access().stride;
+        stride_self == stride_other
+    }
+}
+
+impl PartialOrd for TaskControlBlock {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let stride_self = self.inner.exclusive_access().stride;
+        let stride_other = other.inner.exclusive_access().stride;
+        let res = stride_self.partial_cmp(&stride_other).unwrap();
+        let res = match res {
+            Ordering::Greater => Ordering::Less,
+            Ordering::Less => Ordering::Greater,
+            Ordering::Equal => Ordering::Equal,
+        };
+        Some(res)
+    }
+}
+
+impl TaskControlBlock {
+    pub fn update_stride(&mut self) {
+        self.inner.exclusive_access().update_stride();
+    }
+}
+
+impl TaskControlBlockInner {
+    pub fn update_stride(&mut self) {
+        self.stride.update_stride(self.priority);
+    }
 }
 
 impl TaskControlBlockInner {
@@ -73,6 +118,8 @@ impl TaskControlBlock {
             kernel_stack,
             inner: unsafe {
                 UPSafeCell::new(TaskControlBlockInner {
+                    priority: 16,
+                    stride:Stride::new(0),
                     trap_cx_ppn,
                     base_size: user_sp,
                     task_cx: TaskContext::goto_trap_return(kernel_stack_top),
@@ -140,6 +187,8 @@ impl TaskControlBlock {
             kernel_stack,
             inner: unsafe {
                 UPSafeCell::new(TaskControlBlockInner {
+                    priority: 16,
+                    stride:Stride::new(0),
                     trap_cx_ppn,
                     base_size: parent_inner.base_size,
                     task_cx: TaskContext::goto_trap_return(kernel_stack_top),
@@ -184,6 +233,8 @@ impl TaskControlBlock {
             kernel_stack,
             inner: unsafe {
                 UPSafeCell::new(TaskControlBlockInner {
+                    priority: 16,
+                    stride:Stride::new(0),
                     trap_cx_ppn,
                     base_size: user_sp,
                     task_cx: TaskContext::goto_trap_return(kernel_stack_top),
