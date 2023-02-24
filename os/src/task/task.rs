@@ -21,7 +21,7 @@ pub struct TaskControlBlock {
 
 pub struct TaskControlBlockInner {
     // 新增进程优先级
-    pub priority: u8,
+    pub priority: usize,
     // 新增stride
     pub stride: Stride,
     pub trap_cx_ppn: PhysPageNum,
@@ -72,6 +72,10 @@ impl TaskControlBlock {
 }
 
 impl TaskControlBlockInner {
+    pub fn set_prio(&mut self, prio:usize) {
+        self.priority = prio;
+    }
+
     pub fn update_stride(&mut self) {
         self.stride.update_stride(self.priority);
     }

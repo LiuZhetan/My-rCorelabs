@@ -12,9 +12,9 @@ impl Stride {
             0:s
         }
     }
-    
-    pub fn update_stride(&mut self, p:u8) {
-        let pass = BIG_STRIDE / p;
+
+    pub fn update_stride(&mut self, p:usize) {
+        let pass = (BIG_STRIDE as usize / p) as u8;
         self.0 += pass;
     }
 }
@@ -30,12 +30,12 @@ impl PartialOrd for Stride {
         if self.0 == other.0 {
             Some(Ordering::Equal)
         }
-        else if self.0 > other.0 { 
+        else if self.0 > other.0 {
             let diff = self.0 - other.0;
             if diff <= MIN_DIFF {
                 Some(Ordering::Greater)
             }
-            else { 
+            else {
                 Some(Ordering::Less)
             }
         }

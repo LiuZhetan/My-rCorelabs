@@ -107,11 +107,16 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 }
 
 pub fn sys_set_priority(prio: isize) -> isize{
-    if prio >= 2 {
-        
-        prio
-    }
-    else { 
-        -1
+    match current_task() {
+        Some(task) => {
+            let mut inner = task.inner_exclusive_access();
+            inner.set_prio(prio as usize);
+            println!("[kernel] current process priority: {}",inner.priority);
+            prio
+        }
+        None => {
+            println!("[kernel] can not found current TCB");
+            -1
+        }
     }
 }

@@ -11,6 +11,7 @@ const SYSCALL_FORK: usize = 220;
 const SYSCALL_EXEC: usize = 221;
 const SYSCALL_WAITPID: usize = 260;
 const SYSCALL_SPAWN: usize = 400;
+const SYSCALL_SET_PRIORITY: usize = 140;
 
 fn syscall(id: usize, args: [usize; 3]) -> isize {
     let mut ret: isize;
@@ -76,4 +77,15 @@ pub fn sys_spawn(path: &str) -> isize {
     let path:&str = path.as_str();
     println!("{}",path);
     syscall(SYSCALL_SPAWN, [path.as_ptr() as usize, 0, 0])
+}
+
+pub fn sys_set_priority(prio:isize) -> isize{
+    if prio >= 2 {
+        syscall(SYSCALL_SET_PRIORITY, [prio as usize, 0, 0]);
+        prio
+    }
+    else {
+        println!("process priority must between 2 and 255");
+        -1
+    }
 }
