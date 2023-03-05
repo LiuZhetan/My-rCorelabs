@@ -6,6 +6,7 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use riscv::register::satp;
 use alloc::sync::Arc;
+use core::arch::asm;
 use lazy_static::*;
 use crate::sync::UPSafeCell;
 use crate::config::{

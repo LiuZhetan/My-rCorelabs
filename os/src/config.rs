@@ -10,18 +10,18 @@ pub const PAGE_SIZE_BITS: usize = 0xc;
 pub const TRAMPOLINE: usize = usize::MAX - PAGE_SIZE + 1;
 pub const TRAP_CONTEXT: usize = TRAMPOLINE - PAGE_SIZE;
 
-#[cfg(feature = "board_k210")]
-pub const CLOCK_FREQ: usize = 403000000 / 62;
+/*#[cfg(feature = "board_k210")]
+pub const CLOCK_FREQ: usize = 403000000 / 62;*/
 
-#[cfg(feature = "board_qemu")]
+//#[cfg(feature = "board_qemu")]
 pub const CLOCK_FREQ: usize = 12500000;
 
-#[cfg(feature = "board_qemu")]
+//#[cfg(feature = "board_qemu")]
 pub const MMIO: &[(usize, usize)] = &[
     (0x10001000, 0x1000),
 ];
 
-#[cfg(feature = "board_k210")]
+/*#[cfg(feature = "board_k210")]
 pub const MMIO: &[(usize, usize)] = &[
     // we don't need clint in S priv when running
     // we only need claim/complete for target0 after initializing
@@ -39,4 +39,4 @@ pub const MMIO: &[(usize, usize)] = &[
     (0x5200_0000, 0x1000),      /* SPI0      */
     (0x5300_0000, 0x1000),      /* SPI1      */
     (0x5400_0000, 0x1000),      /* SPI2      */
-];
+];*/
