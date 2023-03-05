@@ -1,5 +1,5 @@
 
-use virtio_drivers::{VirtIOBlk, VirtIOHeader};
+use virtio_drivers::{Hal,VirtIOBlk, VirtIOHeader};
 use crate::mm::{
     PhysAddr,
     VirtAddr,
