@@ -238,7 +238,13 @@ fn link_test() -> std::io::Result<()> {
     let (_,_, nlink) = filea.fstat();
     println!("After unlink the nlink of filea is {}",nlink);
     assert_eq!(1,nlink);
-    println!("test3 ok!");
+    //显示根目录的文件
+    println!("files under root:");
+    let files = root_inode.ls();
+    for file in files {
+        println!("{}",file);
+    }
+    println!("test ok!");
 
     // 测试fallocate
     filea.fallocate(0,7);
@@ -263,5 +269,41 @@ fn link_test() -> std::io::Result<()> {
         read_str,
     );
     println!("test5 ok!");
+
+    //测试多重目录的增加和删除功能
+    root_inode.create_dir("./sub_dir1").expect("Unable to create dir");
+    let files = root_inode.ls();
+    for file in files {
+        println!("{}",file);
+    }
+    let sub_dir1 = root_inode.find("sub_dir1").unwrap();
+    let (ino, is_file,nlink) = sub_dir1.fstat();
+    println!("successfully create file sub_dir1:");
+    println!("ino:{}",ino);
+    println!("is_file:{}",is_file);
+    println!("nlink:{}",nlink);
+    sub_dir1.create("filed");
+    println!("now file in sub_dir1:");
+    let files = sub_dir1.ls();
+    for file in files {
+        println!("{}",file);
+    }
+    let filed = sub_dir1.find("filed").unwrap();
+    filed.write_at(0,"hello world".as_bytes());
+    let len = filed.read_at(0, &mut buffer);
+    let read_str = core::str::from_utf8(&buffer[..len]).unwrap();
+    assert_eq!("hello world", read_str);
+
+    println!("remove filed");
+    assert_eq!(true,sub_dir1.remove_file("filed").is_ok());
+    assert_eq!(sub_dir1.ls().len(),0);
+    println!("remove sub_dir1");
+    assert_eq!(true,root_inode.remove_dir("sub_dir1").is_ok());
+    println!("now root directory:");
+    let files = root_inode.ls();
+    for file in files {
+        println!("{}",file);
+    }
+    println!("test6 ok!");
     Ok(())
 }

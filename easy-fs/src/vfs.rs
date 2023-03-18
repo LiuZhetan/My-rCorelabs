@@ -1,4 +1,3 @@
-use alloc::format;
 use super::{
     BlockDevice,
     DiskInode,
@@ -12,7 +11,7 @@ use super::{
 use alloc::sync::Arc;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::cmp::{max, min};
+use core::cmp::min;
 use spin::{Mutex, MutexGuard};
 
 pub struct Inode {
@@ -192,7 +191,7 @@ impl Inode {
     }
 
     // 修改函数，可以指定inode_number
-    fn __create(&self, name: &str, inode_number: Option<u32>) -> Option<Arc<Inode>> {
+    fn __create(&self, name: &str, inode_number: Option<u32>, inode_type:DiskInodeType) -> Option<Arc<Inode>> {
         let mut fs = self.fs.lock();
         if self.modify_disk_inode(|root_inode| {
             // assert it is a directory
@@ -216,7 +215,7 @@ impl Inode {
         ).lock().modify(new_inode_block_offset, |new_inode: &mut DiskInode| {
             if inode_number.is_none() {
                 // 没有指定inode,直接初始化
-                new_inode.initialize(DiskInodeType::File,new_inode_block_id);
+                new_inode.initialize(inode_type,new_inode_block_id);
             }
             // nlink + 1
             new_inode.add_nlink();
@@ -251,13 +250,13 @@ impl Inode {
     // 不改变原有接口
     #[inline]
     pub fn create(&self, name: &str) -> Option<Arc<Inode>> {
-        self.__create(name,None)
+        self.__create(name,None,DiskInodeType::File)
     }
 
     // 根据已有inode创建文件
     #[inline]
     pub fn create_by_inode(&self, name: &str,inode_number:u32) -> Option<Arc<Inode>> {
-        self.__create(name,Some(inode_number))
+        self.__create(name,Some(inode_number),DiskInodeType::File)
     }
 
     pub fn ls(&self) -> Vec<String> {
@@ -405,12 +404,72 @@ impl Inode {
     }
 
     /// 创建目录
-    pub fn create_dir(&self, name: &str) {
-
+    fn __create_dir(&self, path: &[&str]) -> Result<(),&'static str> {
+        if path.len() == 1 {
+            match self.__create(path[0],None, DiskInodeType::Directory) {
+                Some(_) => Ok(()),
+                None => {
+                    Err("Fail to create directory, directory or file already exist")
+                }
+            }
+        }
+        else {
+            // 寻找下一层的目录Inode
+            let next_dir = self.find(path[0]);
+            match next_dir {
+                Some(dir) => dir.__create_dir(&path[1..]),
+                None => Err("can not found directory")
+            }
+        }
     }
 
-    /// 创建目录
-    pub fn remove_dir(&self, name: &str) {
+    pub fn create_dir(&self, path: &str) -> Result<(),&'static str> {
+        let path:Vec<&str> = path.split('/').collect();
+        if path[0] == "." {
+            self.__create_dir(&path.as_slice()[1..])
+        }
+        else if path[0] == ".."{
+            Err("Not support \"..\"")
+        }
+        else {
+            self.__create_dir(&path.as_slice())
+        }
+    }
 
+    /// 删除空目录
+    fn __remove_dir(&self, path: &[&str]) -> Result<(),&'static str> {
+        // 寻找下一层的目录Inode
+        let next_dir = self.find(path[0]);
+        match next_dir {
+            Some(dir) => {
+                if path.len() == 1 {
+                    let size = dir.read_disk_inode(
+                        |disk_node|{disk_node.size});
+                    if size == 0 && self.remove_file(path[0]).is_ok(){
+                        Ok(())
+                    }
+                    else {
+                        Err("Error: directory is not empty")
+                    }
+                }
+                else {
+                    dir.__remove_dir(&path[1..])
+                }
+            },
+            None => Err("Can not found directory")
+        }
+    }
+
+    pub fn remove_dir(&self, path: &str) -> Result<(),&'static str> {
+        let path:Vec<&str> = path.split('/').collect();
+        if path[0] == "." {
+            self.__remove_dir(&path.as_slice()[1..])
+        }
+        else if path[0] == ".."{
+            Err("Not support \"..\"")
+        }
+        else {
+            self.__remove_dir(&path.as_slice())
+        }
     }
 }

@@ -35,6 +35,8 @@ pub struct TaskControlBlockInner {
     pub children: Vec<Arc<TaskControlBlock>>,
     pub exit_code: i32,
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    // 在pcb中怎加一条工作路径
+    pub current_dir:String,
 }
 
 impl TaskControlBlockInner {
@@ -96,6 +98,8 @@ impl TaskControlBlock {
                     // 2 -> stderr
                     Some(Arc::new(Stdout)),
                 ],
+                // 工作路径初始化为根目录
+                current_dir: String::from("/"),
             })},
         };
         // prepare TrapContext in user space
@@ -109,7 +113,8 @@ impl TaskControlBlock {
         );
         task_control_block
     }
-    pub fn exec(&self, elf_data: &[u8], args: Vec<String>) {
+    // 怎加一个参数，用于更改进程的工作目录
+    pub fn exec(&self, elf_data: &[u8], path:&str, args: Vec<String>) {
         // memory_set with elf program headers/trampoline/trap context/user stack
         let (memory_set, mut user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
@@ -147,6 +152,8 @@ impl TaskControlBlock {
         inner.memory_set = memory_set;
         // update trap_cx ppn
         inner.trap_cx_ppn = trap_cx_ppn;
+        // 更改工作目录
+        inner.current_dir = String::from(path);
         // initialize trap_cx
         let mut trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -197,6 +204,8 @@ impl TaskControlBlock {
                 children: Vec::new(),
                 exit_code: 0,
                 fd_table: new_fd_table,
+                // 直接复制父进程的工作目录
+                current_dir:parent_inner.current_dir.clone()
             })},
         });
         // add child

@@ -92,10 +92,75 @@ impl OpenFlags {
     }
 }
 
-pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
+// 对路径检查，得到不含"./"的路径，如果含有“../”返回false
+#[inline]
+fn check_path(path: &mut Vec<&str>) -> bool {
+    if path[0] == "." {
+        path.remove(0);
+    }
+    if path[0] == ".." {
+        return false;
+    }
+    true
+}
+
+// dir_path为上层目录数组
+fn find_inode(inode: Arc<Inode>, dir_path: &[&str]) -> Option<Arc<Inode>> {
+    assert!(dir_path.len() >= 1);
+    let next_dir = inode.find(dir_path[0]);
+    match next_dir {
+        Some(dir) => {
+            if dir_path.len() == 1 {
+                Some(dir)
+            }
+            else {
+                find_inode(dir, &dir_path[1..])
+            }
+        },
+        None => None
+    }
+}
+
+fn split_path(path: &str) -> Option<(Arc<Inode>,&str)>{
+    let mut path:Vec<_> = path.split('/').collect();
+    if !check_path(&mut path) {
+        return None;
+    }
+    let parent_dir =
+        if path.len() == 1 {
+            // 就在根目录下
+            Some(ROOT_INODE.clone())
+        }
+        else {
+            find_inode(
+                ROOT_INODE.clone(),
+                &path.as_slice()[..(path.len() - 2)]
+            )
+        };
+    match parent_dir {
+        Some(inode) => Some((inode, path.last().unwrap())),
+        None => None
+    }
+}
+
+// 修改，使得可以在多级目录下打开或创建文件
+pub fn open_file(path: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
     let (readable, writable) = flags.read_write();
+    let parent_dir;
+    let name;
+    let res = split_path(path);
+    match res {
+        Some((inode,file_name)) => {
+            parent_dir = inode;
+            name = file_name;
+        }
+        None => {
+            return None;
+        }
+    }
+
     if flags.contains(OpenFlags::CREATE) {
-        if let Some(inode) = ROOT_INODE.find(name) {
+        if let Some(inode) = parent_dir.find(name) {
             // clear size
             inode.clear();
             Some(Arc::new(OSInode::new(
@@ -105,7 +170,7 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
             )))
         } else {
             // create file
-            ROOT_INODE.create(name)
+            parent_dir.create(name)
                 .map(|inode| {
                     Arc::new(OSInode::new(
                         readable,
@@ -115,7 +180,7 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
                 })
         }
     } else {
-        ROOT_INODE.find(name)
+        parent_dir.find(name)
             .map(|inode| {
                 if flags.contains(OpenFlags::TRUNC) {
                     inode.clear();
@@ -131,11 +196,37 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
 
 // 新增加link
 pub fn link_file(old_path:&str, new_path:&str) -> Result<(), &'static str>{
-    match ROOT_INODE.find_inode_number(old_path) {
+    let old_dir;
+    let old_name;
+    let new_dir;
+    let new_name;
+    let res_old = split_path(old_path);
+    let res_new = split_path(new_path);
+    match res_old {
+        Some((inode,file_name)) => {
+            old_dir = inode;
+            old_name = file_name;
+        }
+        None => {
+            return Err("Old path is not correct");
+        }
+    }
+
+    match res_new {
+        Some((inode,file_name)) => {
+            new_dir = inode;
+            new_name = file_name;
+        }
+        None => {
+            return Err("New path is not correct");
+        }
+    }
+
+    match old_dir.find_inode_number(old_name) {
         Ok(res) => {
             match res {
                 Some(inode_number) => {
-                    ROOT_INODE.link(new_path,inode_number);
+                    new_dir.link(new_name,inode_number);
                     Ok(())
                 },
                 None => Err("Can not find file to link at")
