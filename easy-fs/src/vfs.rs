@@ -183,8 +183,12 @@ impl Inode {
             if new_size > disk_inode.size {
                 return;
             }
-            disk_inode.decrease_size(new_size, &self.block_device);
+            let data_blocks_dealloc = disk_inode.decrease_size(new_size, &self.block_device);
+            for data_block in data_blocks_dealloc.into_iter() {
+                self.fs.lock().dealloc_data(data_block);
+            }
         });
+        block_cache_sync_all();
     }
 
     // 修改函数，可以指定inode_number
