@@ -166,3 +166,102 @@ fn efs_test() -> std::io::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn link_test() -> std::io::Result<()> {
+    let block_file = Arc::new(BlockFile(Mutex::new({
+        let f = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open("target/fs.img")?;
+        f.set_len(8192 * 512).unwrap();
+        f
+    })));
+    EasyFileSystem::create(
+        block_file.clone(),
+        4096,
+        1,
+    );
+    let efs = EasyFileSystem::open(block_file.clone());
+    let root_inode = EasyFileSystem::root_inode(&efs);
+    root_inode.create("filea");
+    root_inode.create("fileb");
+    for name in root_inode.ls() {
+        println!("{}", name);
+    }
+    let filea = root_inode.find("filea").unwrap();
+    let greet_str = "Hello, world!";
+    filea.write_at(0, greet_str.as_bytes());
+    //let mut buffer = [0u8; 512];
+    let mut buffer = [0u8; 233];
+    let len = filea.read_at(0, &mut buffer);
+    assert_eq!(
+        greet_str,
+        core::str::from_utf8(&buffer[..len]).unwrap(),
+    );
+
+    // 将filec硬链接到filea，读取filec，能够读到filea的内容
+    let inode_number = root_inode.
+        find_inode_number("filea")
+        .expect("not a file")
+        .unwrap();
+    if root_inode.link("filec",inode_number).is_none() {
+        panic!("file already exist");
+    }
+    let filec = root_inode.find("filec").unwrap();
+    let len = filec.read_at(0, &mut buffer);
+    let read_str = core::str::from_utf8(&buffer[..len]).unwrap();
+    assert_eq!(
+        greet_str,
+        read_str,
+    );
+    println!("test1 ok!");
+
+    // filea向文件写入,filec能读取到更新的内容
+    let add_str = " add by test filea";
+    filea.write_at(len, add_str.as_bytes());
+    let len = filec.read_at(0, &mut buffer);
+    let read_str = core::str::from_utf8(&buffer[..len]).unwrap();
+    assert_eq!(
+        format!("{}{}",greet_str,add_str),
+        read_str,
+    );
+    println!("test2 ok!");
+
+
+    // 现在将filec unlink, 查看filea的引用计数和根目录的目录项
+    let (_,_, nlink) = filea.fstat();
+    println!("Before unlink the nlink of filea is {}",nlink);
+    root_inode.remove_file("filec");
+    let filea = root_inode.find("filea").unwrap();
+    let (_,_, nlink) = filea.fstat();
+    println!("After unlink the nlink of filea is {}",nlink);
+    assert_eq!(1,nlink);
+    println!("test3 ok!");
+
+    // 测试fallocate
+    filea.fallocate(0,7);
+    let header_str = "HEADER:";
+    filea.write_at(0, header_str.as_bytes());
+    filea.fallocate(0,1025);
+    let len = filea.read_at(1025, &mut buffer);
+    let read_str = core::str::from_utf8(&buffer[..len]).unwrap();
+    assert_eq!(
+        format!("{}{}{}", header_str, greet_str, add_str),
+        read_str,
+    );
+    println!("test4 ok!");
+
+    //测试fdeallocate
+    filea.fdeallocate(0,1020);
+    filea.write_at(0, "TEST:".as_bytes());
+    let len = filea.read_at(0, &mut buffer);
+    let read_str = core::str::from_utf8(&buffer[..len]).unwrap();
+    assert_eq!(
+        format!("{}{}{}{}", "TEST:", header_str, greet_str, add_str),
+        read_str,
+    );
+    println!("test5 ok!");
+    Ok(())
+}

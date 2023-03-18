@@ -1,3 +1,4 @@
+use alloc::format;
 use super::{
     BlockDevice,
     DiskInode,
@@ -11,6 +12,7 @@ use super::{
 use alloc::sync::Arc;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::cmp::{max, min};
 use spin::{Mutex, MutexGuard};
 
 pub struct Inode {
@@ -50,11 +52,12 @@ impl Inode {
         ).lock().modify(self.block_offset, f)
     }
 
-    fn find_inode_id(
+    // 不仅要返回inode number还要返回在目录中的位置,即(pos,inode)
+    fn __find_inode(
         &self,
         name: &str,
         disk_inode: &DiskInode,
-    ) -> Option<u32> {
+    ) -> Option<(usize,u32)> {
         // assert it is a directory
         assert!(disk_inode.is_dir());
         let file_count = (disk_inode.size as usize) / DIRENT_SZ;
@@ -69,10 +72,54 @@ impl Inode {
                 DIRENT_SZ,
             );
             if dirent.name() == name {
-                return Some(dirent.inode_number() as u32);
+                return Some((i,dirent.inode_number() as u32));
             }
         }
         None
+    }
+
+    // 只返回inode_id，不返回位置
+    #[inline]
+    fn find_inode_id(
+        &self,
+        name: &str,
+        disk_inode: &DiskInode,
+    ) -> Option<u32> {
+        match self.__find_inode(name,disk_inode) {
+            Some((_,inode)) => Some(inode),
+            None => None
+        }
+    }
+
+    // 对外暴露的在磁盘块上查询inode number的接口
+    #[inline]
+    pub fn find_inode_number(&self, name: &str) -> Result<Option<u32>,&'static str>{
+        self.read_disk_inode(|disk_inode|{
+            if disk_inode.is_dir() {
+                Ok(self.find_inode_id(name,disk_inode))
+            }
+            else {
+                Err("Not a file")
+            }
+        })
+    }
+
+    // 找到目录下文件名为name的目录项的位置并生成指向Inode的指针
+    fn find_inode_pos(&self, name: &str) -> Option<(usize, Arc<Inode>)>{
+        let fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| {
+            self.__find_inode(name, disk_inode)
+                .map(|(pos,inode_id)| {
+                    let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);
+                    (pos,
+                     Arc::new(Self::new(
+                        block_id,
+                        block_offset,
+                        self.fs.clone(),
+                        self.block_device.clone(),
+                    )))
+                })
+        })
     }
 
     pub fn find(&self, name: &str) -> Option<Arc<Inode>> {
@@ -108,7 +155,40 @@ impl Inode {
         disk_inode.increase_size(new_size, v, &self.block_device);
     }
 
-    pub fn create(&self, name: &str) -> Option<Arc<Inode>> {
+    // 封装了increase_self_size,使得函数更方便使用
+    fn increase_self_size(
+        &self,
+        new_size: u32,
+    ) {
+        self.modify_disk_inode(|disk_inode|{
+            if new_size < disk_inode.size {
+                return;
+            }
+            let blocks_needed = disk_inode.blocks_num_needed(new_size);
+            let mut v: Vec<u32> = Vec::new();
+            let fs = &mut self.fs.lock();
+            for _ in 0..blocks_needed {
+                v.push(fs.alloc_data());
+            }
+            disk_inode.increase_size(new_size, v, &self.block_device);
+        })
+    }
+
+    // 与increase_self_size对应的减小Inode文件块的方法
+    fn decrease_self_size(
+        &self,
+        new_size: u32,
+    ) {
+        self.modify_disk_inode(|disk_inode|{
+            if new_size > disk_inode.size {
+                return;
+            }
+            disk_inode.decrease_size(new_size, &self.block_device);
+        });
+    }
+
+    // 修改函数，可以指定inode_number
+    fn __create(&self, name: &str, inode_number: Option<u32>) -> Option<Arc<Inode>> {
         let mut fs = self.fs.lock();
         if self.modify_disk_inode(|root_inode| {
             // assert it is a directory
@@ -120,7 +200,9 @@ impl Inode {
         }
         // create a new file
         // alloc a inode with an indirect block
-        let new_inode_id = fs.alloc_inode();
+        // 修改new_inode_id的初始化方式
+        let new_inode_id = if inode_number.is_some()
+            {inode_number.unwrap()} else {fs.alloc_inode()};
         // initialize inode
         let (new_inode_block_id, new_inode_block_offset) 
             = fs.get_disk_inode_pos(new_inode_id);
@@ -128,7 +210,12 @@ impl Inode {
             new_inode_block_id as usize,
             Arc::clone(&self.block_device)
         ).lock().modify(new_inode_block_offset, |new_inode: &mut DiskInode| {
-            new_inode.initialize(DiskInodeType::File);
+            if inode_number.is_none() {
+                // 没有指定inode,直接初始化
+                new_inode.initialize(DiskInodeType::File,new_inode_block_id);
+            }
+            // nlink + 1
+            new_inode.add_nlink();
         });
         self.modify_disk_inode(|root_inode| {
             // append file in the dirent
@@ -155,6 +242,18 @@ impl Inode {
             self.block_device.clone(),
         )))
         // release efs lock automatically by compiler
+    }
+
+    // 不改变原有接口
+    #[inline]
+    pub fn create(&self, name: &str) -> Option<Arc<Inode>> {
+        self.__create(name,None)
+    }
+
+    // 根据已有inode创建文件
+    #[inline]
+    pub fn create_by_inode(&self, name: &str,inode_number:u32) -> Option<Arc<Inode>> {
+        self.__create(name,Some(inode_number))
     }
 
     pub fn ls(&self) -> Vec<String> {
@@ -200,11 +299,114 @@ impl Inode {
         self.modify_disk_inode(|disk_inode| {
             let size = disk_inode.size;
             let data_blocks_dealloc = disk_inode.clear_size(&self.block_device);
-            assert!(data_blocks_dealloc.len() == DiskInode::total_blocks(size) as usize);
+            assert_eq!(data_blocks_dealloc.len(), DiskInode::total_blocks(size) as usize);
             for data_block in data_blocks_dealloc.into_iter() {
                 fs.dealloc_data(data_block);
             }
         });
         block_cache_sync_all();
+    }
+}
+
+impl Inode {
+    // 实现fallocate系统调用
+    pub fn fallocate(&self, offset:usize ,len:usize) {
+        let origin_size= self.read_disk_inode(
+            |disk_inode| {disk_inode.size as usize});
+        self.increase_self_size((origin_size + len) as u32);
+        const BUF_SZ: usize = 512;
+        let read_bound = offset + BUF_SZ;
+        let mut buf = [0u8;BUF_SZ];
+        let mut read_start =
+            if origin_size > BUF_SZ
+                {origin_size - BUF_SZ}
+            else { origin_size };
+        let mut write_start = read_start + len;
+
+        while read_start > read_bound {
+            self.read_at(read_start as usize,&mut buf);
+            self.write_at(write_start as usize,&mut buf);
+            // 不会向下溢出,read_bound > BUF_SZ,
+            // 又write_start > read_start > read_bound
+            // read_start - BUF_SZ > 0 , WRITE_start - BUF_SZ > 0
+            write_start -= BUF_SZ;
+            read_start -= BUF_SZ;
+        }
+        if read_start > offset {
+            let last_size = read_start - offset;
+            self.read_at(offset,&mut buf[..last_size]);
+            self.write_at(offset + len,&mut buf[..last_size]);
+        }
+    }
+
+    // 实现fdeallocate
+    pub fn fdeallocate(&self, offset:usize, len:usize) {
+        let origin_size= self.read_disk_inode(
+            |disk_inode| {disk_inode.size as usize});
+        const BUF_SZ: usize = 512;
+        // 这里无符号数相减的会溢出
+        let read_bound = if origin_size > BUF_SZ {origin_size - BUF_SZ} else {0};
+        let mut buf = [0u8;BUF_SZ];
+        let mut write_start = offset;
+        let mut read_start = min(offset + len,origin_size);
+        while read_start < read_bound {
+            self.read_at(read_start,&mut buf);
+            self.write_at(write_start,&mut buf);
+            write_start += BUF_SZ;
+            read_start += BUF_SZ;
+        }
+        if read_start < origin_size {
+            let last_size = origin_size - read_start;
+            self.read_at(read_start,&mut buf[..last_size]);
+            self.write_at(write_start,&mut buf[..last_size]);
+        }
+        // 最后要回收空缺的块
+        let new_size = origin_size - len;
+        self.decrease_self_size(new_size as u32);
+    }
+
+    /// 删除目录下的文件
+    pub fn remove_file(&self, name: &str) -> Result<(), &'static str>{
+        let res= self.find_inode_pos(name);
+        match res {
+            Some((pos,inode)) => {
+                let mut nlink= 0;
+                inode.modify_disk_inode(|disk_inode| {
+                    disk_inode.sub_nlink();
+                    nlink = disk_inode.nlink;
+                });
+                if nlink == 0 {
+                    // 链接数为0,删除文件
+                    inode.clear();
+                }
+                // 回收一个目录项
+                self.fdeallocate(pos*DIRENT_SZ,DIRENT_SZ);
+                Ok(())
+            }
+            None => Err("fail to remove file")
+        }
+    }
+
+    /// 新建一个link
+    #[inline]
+    pub fn link(&self, name: &str, inode_number:u32) -> Option<Arc<Inode>>{
+        self.create_by_inode(name,inode_number)
+    }
+
+    /// 查看文件信息,返回三元组(inode_number, is_file, nlink)
+    pub fn fstat(&self) -> (u32, bool, u32){
+        self.read_disk_inode(|disk_inode| {
+            (disk_inode.ino,disk_inode.is_file(),disk_inode.nlink)
+        })
+    }
+
+    /// 创建目录
+    pub fn create_dir(&self, name: &str) {
+
+    }
+
+    /// 创建目录
+    pub fn remove_dir(&self, name: &str) {
+
     }
 }

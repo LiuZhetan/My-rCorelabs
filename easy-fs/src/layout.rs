@@ -79,7 +79,9 @@ pub struct DiskInode {
     pub indirect2: u32,
     type_: DiskInodeType,
     // 新增以下属性
-    pub nlink: u32,
+    pub nlink: u32, //链接计数
+    pub ino:u32,    //索引节点
+    //pub parent_ino:u32,
 }
 
 impl DiskInode {
@@ -90,17 +92,22 @@ impl DiskInode {
     pub fn add_nlink(&mut self) {
         self.nlink+=1;
     }
+
+    pub fn sub_nlink(&mut self) {
+        self.nlink-=1;
+    }
 }
 
 impl DiskInode {
     /// indirect1 and indirect2 block are allocated only when they are needed.
-    pub fn initialize(&mut self, type_: DiskInodeType) {
+    pub fn initialize(&mut self, type_: DiskInodeType, inode_id:u32) {
         self.size = 0;
         self.direct.iter_mut().for_each(|v| *v = 0);
         self.indirect1 = 0;
         self.indirect2 = 0;
         self.type_ = type_;
         self.nlink = 0;
+        self.ino = inode_id;
     }
     pub fn is_dir(&self) -> bool {
         self.type_ == DiskInodeType::Directory
@@ -246,6 +253,93 @@ impl DiskInode {
                 }
             }
         });
+    }
+
+    //以下新增两个方法,读/写某个块内索引为index的块
+    fn read_block_dirent(
+        block_id:usize,
+        index:usize,
+        block_device: Arc<dyn BlockDevice>
+    ) -> u32 {
+        get_block_cache(
+            block_id,
+            block_device,
+        )
+        .lock()
+        .modify(0, |indirect: &mut IndirectBlock| {
+            indirect[index]
+        })
+    }
+
+    fn write_block_dirent(
+        block_id:usize,
+        index:usize,
+        value:u32,
+        block_device: Arc<dyn BlockDevice>
+    ) -> u32 {
+        get_block_cache(
+            block_id,
+            block_device,
+        )
+        .lock()
+        .modify(0, |indirect: &mut IndirectBlock| {
+            let res = indirect[index];
+            indirect[index] = value;
+            res
+        })
+    }
+
+    // 增加一个方法,减小disk inode的大小
+    pub fn decrease_size(
+        &mut self,
+        new_size: u32,
+        block_device: &Arc<dyn BlockDevice>,
+    ) -> Vec<u32> {
+        let origin_blocks = self.data_blocks() as usize;
+        self.size = new_size;
+        let new_blocks = self.data_blocks() as usize;
+        assert!(new_blocks <= origin_blocks);
+
+        let mut to_deallocate = Vec::new();
+        // 回收从第new_blocks的block到第origin_blocks多余的block
+        for i in new_blocks .. origin_blocks {
+            if i < INODE_DIRECT_COUNT {
+                to_deallocate.push(self.direct[i]);
+                // 需要写入0吗？
+                self.direct[i] = 0;
+            }
+            else if i - INODE_DIRECT_COUNT < INODE_INDIRECT1_COUNT {
+                to_deallocate.push(
+                    Self::write_block_dirent(
+                        self.indirect1 as usize,
+                        i - INODE_DIRECT_COUNT,
+                        0,
+                        block_device.clone(),
+                    )
+                )
+            }
+            else {
+                let idx = i - INODE_DIRECT_COUNT - INDIRECT1_BOUND;
+                assert!(idx <= INODE_INDIRECT2_COUNT);
+                // 计算第一级索引和第二级索引
+                let (index1, index2) =
+                    (idx / INODE_INDIRECT1_COUNT, idx % INODE_INDIRECT1_COUNT);
+                let direct1_block = Self::read_block_dirent(
+                    self.indirect2 as usize,
+                    index1,
+                    block_device.clone(),
+                );
+                to_deallocate.push(
+                    Self::write_block_dirent(
+                        direct1_block as usize,
+                        index2,
+                        0,
+                        block_device.clone(),
+                    )
+                )
+            }
+        }
+        to_deallocate
     }
 
     /// Clear size to zero and return blocks that should be deallocated.

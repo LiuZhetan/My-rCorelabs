@@ -129,6 +129,22 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
     }
 }
 
+// 新增加link
+pub fn link_file(old_path:&str, new_path:&str) -> Result<(), &'static str>{
+    match ROOT_INODE.find_inode_number(old_path) {
+        Ok(res) => {
+            match res {
+                Some(inode_number) => {
+                    ROOT_INODE.link(new_path,inode_number);
+                    Ok(())
+                },
+                None => Err("Can not find file to link at")
+            }
+        },
+        Err(info) => Err(info)
+    }
+}
+
 impl File for OSInode {
     fn readable(&self) -> bool { self.readable }
     fn writable(&self) -> bool { self.writable }
