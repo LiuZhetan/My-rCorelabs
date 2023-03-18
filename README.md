@@ -1,7 +1,10 @@
 # My-rCorelabs
 学习清华的rcore项目，用rust写一个运行在risc v架构上的操作系统内核
+
 项目教程地址：http://rcore-os.cn/rCore-Tutorial-Book-v3/index.html
+
 rcore github: https://github.com/rcore-os/rCore-Tutorial-v3
+
 本项目主要以完成rcore的lab为主，也会参考教程的编程题对rcore进行拓展。
 # 任务清单
 1. ch1：跳过
@@ -14,8 +17,8 @@ rcore github: https://github.com/rcore-os/rCore-Tutorial-v3
 ch6,ch7,ch8,ch9的实验练习，最后打算实现多核的rcore
 
 2023.3.18更新
-ch7-lab：（实际上是第六章的文件系统）在easy_fs中实现了link、remove_file、fallocate、fdeallocate功能
-link：创建硬链接
-remove_file：删除文件，删除硬链接的话会使得文件的链接计数-1
-fallocate：类似于linux的fallocate调用，在文件中插入一段空洞（会分配存储空间）
-fdeallocate: 
+1. ch7-lab：（实际上是第六章的文件系统）在easy_fs中实现了link、remove_file、fallocate、fdeallocate功能
+2. link：创建硬链接
+3. remove_file：删除文件，删除硬链接的话会使得文件的链接计数-1
+4. fallocate：类似于linux的fallocate调用，在文件中插入一段空洞（会分配存储空间）
+5. fdeallocate: 在文件中删除一段空间，回收块
