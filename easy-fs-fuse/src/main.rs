@@ -244,7 +244,7 @@ fn link_test() -> std::io::Result<()> {
     for file in files {
         println!("{}",file);
     }
-    println!("test ok!");
+    println!("test1 ok!");
 
     // 测试fallocate
     filea.fallocate(0,7);
