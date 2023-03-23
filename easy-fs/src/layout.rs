@@ -81,7 +81,7 @@ pub struct DiskInode {
     // 新增以下属性
     pub nlink: u32, //链接计数
     pub ino:u32,    //索引节点
-    //pub parent_ino:u32,
+    pub parent_ino:u32, //父目录的索引节点
 }
 
 impl DiskInode {
@@ -100,7 +100,7 @@ impl DiskInode {
 
 impl DiskInode {
     /// indirect1 and indirect2 block are allocated only when they are needed.
-    pub fn initialize(&mut self, type_: DiskInodeType, inode_id:u32) {
+    pub fn initialize(&mut self, type_: DiskInodeType, inode_id:u32, parent_inode_id:u32) {
         self.size = 0;
         self.direct.iter_mut().for_each(|v| *v = 0);
         self.indirect1 = 0;
@@ -108,6 +108,7 @@ impl DiskInode {
         self.type_ = type_;
         self.nlink = 0;
         self.ino = inode_id;
+        self.parent_ino = parent_inode_id;
     }
     pub fn is_dir(&self) -> bool {
         self.type_ == DiskInodeType::Directory

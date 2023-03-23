@@ -233,7 +233,7 @@ fn link_test() -> std::io::Result<()> {
     // 现在将filec unlink, 查看filea的引用计数和根目录的目录项
     let (_,_, nlink) = filea.fstat();
     println!("Before unlink the nlink of filea is {}",nlink);
-    root_inode.remove_file("filec");
+    root_inode.remove("filec");
     let filea = root_inode.find("filea").unwrap();
     let (_,_, nlink) = filea.fstat();
     println!("After unlink the nlink of filea is {}",nlink);
@@ -244,7 +244,7 @@ fn link_test() -> std::io::Result<()> {
     for file in files {
         println!("{}",file);
     }
-    println!("test1 ok!");
+    println!("test3 ok!");
 
     // 测试fallocate
     filea.fallocate(0,7);
@@ -271,7 +271,7 @@ fn link_test() -> std::io::Result<()> {
     println!("test5 ok!");
 
     //测试多重目录的增加和删除功能
-    root_inode.create_dir("./sub_dir1").expect("Unable to create dir");
+    root_inode.create_dir("sub_dir1").expect("Unable to create dir");
     let files = root_inode.ls();
     for file in files {
         println!("{}",file);
@@ -295,10 +295,10 @@ fn link_test() -> std::io::Result<()> {
     assert_eq!("hello world", read_str);
 
     println!("remove filed");
-    assert_eq!(true,sub_dir1.remove_file("filed").is_ok());
+    assert_eq!(true,sub_dir1.remove("filed").is_ok());
     assert_eq!(sub_dir1.ls().len(),0);
     println!("remove sub_dir1");
-    assert_eq!(true,root_inode.remove_dir("sub_dir1").is_ok());
+    assert_eq!(true,root_inode.remove("sub_dir1").is_ok());
     println!("now root directory:");
     let files = root_inode.ls();
     for file in files {

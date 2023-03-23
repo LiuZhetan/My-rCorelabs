@@ -35,8 +35,10 @@ pub struct TaskControlBlockInner {
     pub children: Vec<Arc<TaskControlBlock>>,
     pub exit_code: i32,
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
-    // 在pcb中怎加一条工作路径
+    // 在pcb中增加一条工作路径
     pub current_dir:String,
+    // 当前目录的索引编号
+    pub current_dir_ino:u32,
 }
 
 impl TaskControlBlockInner {
@@ -100,6 +102,8 @@ impl TaskControlBlock {
                 ],
                 // 工作路径初始化为根目录
                 current_dir: String::from("/"),
+                // 根目录的上层目录还是根目录
+                current_dir_ino: 0,
             })},
         };
         // prepare TrapContext in user space
@@ -205,7 +209,8 @@ impl TaskControlBlock {
                 exit_code: 0,
                 fd_table: new_fd_table,
                 // 直接复制父进程的工作目录
-                current_dir:parent_inner.current_dir.clone()
+                current_dir:parent_inner.current_dir.clone(),
+                current_dir_ino:parent_inner.current_dir_ino,
             })},
         });
         // add child

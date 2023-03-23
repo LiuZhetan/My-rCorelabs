@@ -10,6 +10,7 @@ use bitflags::*;
 use alloc::vec::Vec;
 use super::File;
 use crate::mm::UserBuffer;
+use crate::task::current_task;
 
 pub struct OSInode {
     readable: bool,
@@ -92,7 +93,7 @@ impl OpenFlags {
     }
 }
 
-// 对路径检查，得到不含"./"的路径，如果含有“../”返回false
+/*// 对路径检查，得到不含"./"的路径，如果含有“../”返回false
 #[inline]
 fn check_path(path: &mut Vec<&str>) -> bool {
     if path[0] == "." {
@@ -102,6 +103,56 @@ fn check_path(path: &mut Vec<&str>) -> bool {
         return false;
     }
     true
+}*/
+
+#[inline]
+fn parent_dir_ino() -> u32 {
+    let inner = current_task().unwrap().inner_exclusive_access();
+    inner.current_dir_ino
+}
+
+fn current_dir_inode() -> Inode {
+    let ino = parent_dir_ino();
+    let efs = ROOT_INODE.get_fs();
+    let block_device = ROOT_INODE.get_device();
+    let (block_id, block_offset) = efs.lock().get_disk_inode_pos(ino);
+    // release efs lock
+    Inode::new(
+        block_id,
+        block_offset,
+        efs,
+        block_device,
+    )
+}
+
+// 解析包含了“./”和“../”的路径字符串，
+// 返回它相对路径开始的第一个目录的Inode，
+// 和以此目录为起点的相对路径
+fn derive_path(path:&str) -> (Arc<Inode>,Vec<&str>) {
+    if path.starts_with('/') {
+        // 绝对路径解析
+        let path:Vec<_> = path.split('/').collect();
+        (ROOT_INODE.clone(), path)
+    }
+    else {
+        // 相对路径
+        let mut path:Vec<_> = path.split('/').collect();
+        let mut parent_dir_ino = current_dir_inode();
+        let mut count = 0;
+        for (i,dir) in path.iter().enumerate(){
+            if dir.eq(&"..") {
+                parent_dir_ino = parent_dir_ino.parent_inode();
+            }
+            else if dir.eq(&".") {
+                continue
+            }
+            else {
+                count = i;
+                break
+            }
+        }
+        (Arc::new(parent_dir_ino), path.drain(count..).collect())
+    }
 }
 
 // dir_path为上层目录数组
@@ -111,6 +162,7 @@ fn find_inode(inode: Arc<Inode>, dir_path: &[&str]) -> Option<Arc<Inode>> {
     match next_dir {
         Some(dir) => {
             if dir_path.len() == 1 {
+                // 递归出口
                 Some(dir)
             }
             else {
@@ -122,22 +174,12 @@ fn find_inode(inode: Arc<Inode>, dir_path: &[&str]) -> Option<Arc<Inode>> {
 }
 
 fn split_path(path: &str) -> Option<(Arc<Inode>,&str)>{
-    let mut path:Vec<_> = path.split('/').collect();
-    if !check_path(&mut path) {
-        return None;
-    }
-    let parent_dir =
-        if path.len() == 1 {
-            // 就在根目录下
-            Some(ROOT_INODE.clone())
-        }
-        else {
-            find_inode(
-                ROOT_INODE.clone(),
-                &path.as_slice()[..(path.len() - 2)]
-            )
-        };
-    match parent_dir {
+    let (parent_dir_inode,path) = derive_path(path);
+    let parent_dir_inode = find_inode(
+        parent_dir_inode,
+        &path.as_slice()[..(path.len() - 2)]
+    );
+    match parent_dir_inode {
         Some(inode) => Some((inode, path.last().unwrap())),
         None => None
     }
@@ -236,6 +278,62 @@ pub fn link_file(old_path:&str, new_path:&str) -> Result<(), &'static str>{
     }
 }
 
+pub fn unlink(path: &str) -> Result<(), &'static str> {
+    let res = split_path(path);
+    match res {
+        Some((inode,file_name)) => {
+            inode.remove(file_name)
+        }
+        None => Err("Can not find path")
+    }
+}
+
+pub fn create_dir(path: &str) -> Option<Arc<OSInode>> {
+    let res = split_path(path);
+    match res {
+        Some((inode,file_name)) => {
+            let res = inode.create_dir(file_name);
+            match res {
+                Some(inner) => Some(Arc::new(OSInode::new(
+                    true,
+                    false,
+                    inner
+                ))),
+                None => None
+            }
+        }
+        None => None
+    }
+}
+
+/*// 对目录只读
+pub fn open_dir(path:&str) -> Option<Arc<OSInode>> {
+    let parent_dir;
+    let name;
+    let res = split_path(path);
+    match res {
+        Some((inode,file_name)) => {
+            parent_dir = inode;
+            name = file_name;
+        }
+        None => {
+            return None;
+        }
+    }
+    parent_dir.find(name)
+        .map(|inode| {
+            Arc::new(OSInode::new(
+                true,
+                false,
+                inode
+            ))
+        })
+}*/
+
+pub fn get_dents() {
+    
+}
+
 impl File for OSInode {
     fn readable(&self) -> bool { self.readable }
     fn writable(&self) -> bool { self.writable }
@@ -263,4 +361,11 @@ impl File for OSInode {
         }
         total_write_size
     }
+}
+
+
+
+// 为了实现目录的读取的读取，增加一个接口
+pub trait Directory {
+    fn
 }
