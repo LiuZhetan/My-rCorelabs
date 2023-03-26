@@ -1,7 +1,4 @@
-use easy_fs::{
-    EasyFileSystem,
-    Inode,
-};
+use easy_fs::{DirEntry, EasyFileSystem, FileType, Inode, OSStat};
 use crate::drivers::BLOCK_DEVICE;
 use crate::sync::UPSafeCell;
 use alloc::sync::Arc;
@@ -107,22 +104,26 @@ fn check_path(path: &mut Vec<&str>) -> bool {
 
 #[inline]
 fn parent_dir_ino() -> u32 {
-    let inner = current_task().unwrap().inner_exclusive_access();
+    let tcb = current_task().unwrap();
+    let inner = tcb.inner_exclusive_access();
     inner.current_dir_ino
 }
 
-fn current_dir_inode() -> Inode {
-    let ino = parent_dir_ino();
+fn from_inode_id(inode_id:u32) -> Inode {
     let efs = ROOT_INODE.get_fs();
     let block_device = ROOT_INODE.get_device();
-    let (block_id, block_offset) = efs.lock().get_disk_inode_pos(ino);
-    // release efs lock
+    let (block_id, block_offset) = efs.lock().get_disk_inode_pos(inode_id);
     Inode::new(
         block_id,
         block_offset,
         efs,
         block_device,
     )
+}
+
+fn current_dir_inode() -> Inode {
+    let ino = parent_dir_ino();
+    from_inode_id(ino)
 }
 
 // 解析包含了“./”和“../”的路径字符串，
@@ -330,10 +331,6 @@ pub fn open_dir(path:&str) -> Option<Arc<OSInode>> {
         })
 }*/
 
-pub fn get_dents() {
-    
-}
-
 impl File for OSInode {
     fn readable(&self) -> bool { self.readable }
     fn writable(&self) -> bool { self.writable }
@@ -361,11 +358,89 @@ impl File for OSInode {
         }
         total_write_size
     }
+    // whence第1位为1表示将OSInode的offset设置为当前的offset
+    // whence第2位为1表示将OSInode的offset将传入的的offset
+    fn seek(&self, offset: usize, whence: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        if whence & 1 > 0 {
+            inner.offset = offset;
+            inner.offset as isize
+        }
+        else if whence & (1 << 1) > 0 {
+            inner.offset += offset;
+            inner.offset as isize
+        }
+        else {
+            -1
+        }
+    }
+
+    fn stat(&self) -> Option<OSStat> {
+        let inner = self.inner.exclusive_access();
+        Some(inner.inode.fstat())
+    }
 }
 
 
 
 // 为了实现目录的读取的读取，增加一个接口
 pub trait Directory {
-    fn
+    fn is_dir(&self) -> bool {
+        false
+    }
+    fn get_dents(&self, _count:usize) -> Option<Vec<OSDirent>> {
+        None
+    }
 }
+
+//type FileType = DiskInodeType;
+
+// 拓展目录项，比索引块中的目录项DirEntry有更多的的信息
+pub struct OSDirent {
+    d_ino: u32,
+    d_name: [u8; 28],
+    d_offset: usize,
+    d_type: FileType,
+}
+
+fn dent2os(dirent:DirEntry, index:usize) -> OSDirent {
+    let d_ino = dirent.inode_number;
+    let inode = from_inode_id(d_ino);
+    let d_type = inode.read_disk_inode(|disk_inode|{
+        disk_inode.type_.clone()
+    });
+    OSDirent {
+        d_ino,
+        d_name: dirent.name,
+        d_offset: index,
+        d_type,
+    }
+}
+
+impl Directory for OSInode {
+    fn is_dir(&self) -> bool {
+        let inner = self.inner.exclusive_access();
+        inner.inode.is_dir()
+    }
+
+    fn get_dents(&self, count:usize) -> Option<Vec<OSDirent>> {
+        let inner = self.inner.exclusive_access();
+        if inner.inode.is_file() {
+            None
+        }
+        else {
+            let dents = inner.inode.get_dents(count);
+            let mut v:Vec<OSDirent> = Vec::with_capacity(dents.len());
+            let mut i = 0;
+            for dent in dents{
+                v.push(dent2os(dent,i));
+                i +=1;
+            }
+            Some(v)
+        }
+    }
+}
+
+pub trait Fd: File + Directory {}
+
+impl Fd for OSInode {}

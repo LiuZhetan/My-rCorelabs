@@ -37,7 +37,8 @@ impl Inode {
         }
     }
 
-    fn read_disk_inode<V>(&self, f: impl FnOnce(&DiskInode) -> V) -> V {
+    // 权限变更为公有
+    pub fn read_disk_inode<V>(&self, f: impl FnOnce(&DiskInode) -> V) -> V {
         get_block_cache(
             self.block_id,
             Arc::clone(&self.block_device)
@@ -299,8 +300,8 @@ impl Inode {
         })
     }
 
-    // 新增加get_dirents方法
-    pub fn get_dirents(&self, count:usize) -> Vec<DirEntry> {
+    // 新增加get_dents方法读取目录项
+    pub fn get_dents(&self, count:usize) -> Vec<DirEntry> {
         let _fs = self.fs.lock();
         self.read_disk_inode(|disk_inode| {
             let file_count = (disk_inode.size as usize) / DIRENT_SZ;
@@ -451,9 +452,14 @@ impl Inode {
     }
 
     /// 查看文件信息,返回三元组(inode_number, is_file, nlink)
-    pub fn fstat(&self) -> (u32, bool, u32){
+    pub fn fstat(&self) -> OSStat {
         self.read_disk_inode(|disk_inode| {
-            (disk_inode.ino,disk_inode.is_file(),disk_inode.nlink)
+            OSStat {
+                size: disk_inode.size,
+                ino: disk_inode.ino,
+                f_type: disk_inode.type_.clone(),
+                nlink: disk_inode.nlink,
+            }
         })
     }
 
@@ -561,6 +567,20 @@ impl Inode {
     pub fn get_device(&self) -> Arc<dyn BlockDevice> {
         self.block_device.clone()
     }
+
+    #[inline]
+    pub fn is_dir(&self) -> bool {
+        self.read_disk_inode(|disk_inode| {
+            disk_inode.is_dir()
+        })
+    }
+
+    #[inline]
+    pub fn is_file(&self) -> bool {
+        self.read_disk_inode(|disk_inode| {
+            disk_inode.is_file()
+        })
+    }
     
     pub fn parent_inode(&self) -> Self {
         // 先得到父目录的ino
@@ -575,4 +595,13 @@ impl Inode {
             self.block_device.clone(),
         )
     }
+}
+
+pub type FileType = DiskInodeType;
+
+pub struct OSStat {
+    pub size: u32,
+    pub ino: u32,
+    pub f_type: FileType,
+    pub nlink: u32,
 }

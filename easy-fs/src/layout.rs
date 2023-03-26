@@ -62,7 +62,7 @@ impl SuperBlock {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq,Clone)]
 pub enum DiskInodeType {
     File,
     Directory,
@@ -77,7 +77,7 @@ pub struct DiskInode {
     pub direct: [u32; INODE_DIRECT_COUNT],
     pub indirect1: u32,
     pub indirect2: u32,
-    type_: DiskInodeType,
+    pub type_: DiskInodeType,
     // 新增以下属性
     pub nlink: u32, //链接计数
     pub ino:u32,    //索引节点
@@ -507,10 +507,11 @@ impl DiskInode {
     }
 }
 
+// 成员全部变为公有
 #[repr(C)]
 pub struct DirEntry {
-    name: [u8; NAME_LENGTH_LIMIT + 1],
-    inode_number: u32,
+    pub name: [u8; NAME_LENGTH_LIMIT + 1],
+    pub inode_number: u32,
 }
 
 pub const DIRENT_SZ: usize = 32;

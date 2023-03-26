@@ -1,5 +1,8 @@
 use super::File;
 use alloc::sync::{Arc, Weak};
+use alloc::vec::Vec;
+use crate::fs::{Directory, Fd};
+use crate::fs::inode::OSDirent;
 use crate::sync::UPSafeCell;
 use crate::mm::UserBuffer;
 
@@ -166,3 +169,9 @@ impl File for Pipe {
         }
     }
 }
+
+impl Directory for Pipe {
+    
+}
+
+impl Fd for Pipe {}

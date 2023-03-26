@@ -6,10 +6,10 @@ use crate::mm::{
     translated_str,
 };
 use crate::task::{current_user_token, current_task};
-use crate::fs::{make_pipe, OpenFlags, open_file, create_dir};
+use crate::fs::{make_pipe, OpenFlags, open_file, create_dir, OSDirent, link_file, unlink};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use easy_fs::{DIRENT_SZ,DirEntry};
+use easy_fs::{FileType};
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     let token = current_user_token();
@@ -113,6 +113,90 @@ pub fn sys_dup(fd: usize) -> isize {
     new_fd as isize
 }
 
+pub fn sys_linkat(old_path:*const u8, new_path:*const u8) -> isize{
+    let token = current_user_token();
+    let old_path = translated_str(token, old_path);
+    let new_path = translated_str(token, new_path);
+    match link_file(old_path.as_str(), new_path.as_str()) {
+        Ok(_) => 0,
+        Err(info) => {
+            println!("[Kernel] Error: {}",info);
+            -1
+        }
+    }
+}
+
+pub fn sys_unlinkat(path:*const u8) -> isize{
+    let token = current_user_token();
+    let path = translated_str(token, path);
+    match unlink(path.as_str()) {
+        Ok(_) => 0,
+        Err(info) => {
+            println!("[Kernel] Error: {}",info);
+            -1
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct Stat {
+    /// 文件所在磁盘驱动器号，该实验中写死为 0 即可
+    pub dev: u64,
+    /// inode 文件所在 inode 编号
+    pub ino: u64,
+    /// 文件类型
+    pub mode: StatMode,
+    /// 硬链接数量，初始为1
+    pub nlink: u32,
+    /// 无需考虑，为了兼容性设计
+    pad: [u64; 7],
+}
+
+// StatMode 定义：
+bitflags! {
+    pub struct StatMode: u32 {
+        const NULL  = 0;
+        /// directory
+        const DIR   = 0o040000;
+        /// ordinary regular file
+        const FILE  = 0o100000;
+    }
+}
+
+pub fn sys_stat(fd: usize, st: *mut Stat) -> isize{
+    let token = current_user_token();
+    let task = current_task().unwrap();
+    let inner = task.inner_exclusive_access();
+    let st = translated_refmut(token, st);
+    if fd >= inner.fd_table.len() {
+        return -1;
+    }
+    if let Some(file) = &inner.fd_table[fd] {
+        let file = file.clone();
+        if !file.readable() {
+            return -1;
+        }
+        // release current task TCB manually to avoid multi-borrow
+        drop(inner);
+        match file.stat() {
+            Some(os_st) => unsafe {
+                st.dev = 0;
+                st.ino = os_st.ino as u64;
+                match os_st.f_type {
+                    FileType::File => st.mode = StatMode::FILE,
+                    FileType::Directory => st.mode = StatMode::DIR,
+                }
+                st.nlink = os_st.nlink;
+                0
+            },
+            None => -1
+        }
+    } else {
+        -1
+    }
+}
+
 // 新增对于目录的系统调用
 pub fn sys_mkdir(path:*const u8) -> isize {
     let token = current_user_token();
@@ -126,28 +210,62 @@ pub fn sys_mkdir(path:*const u8) -> isize {
     }
 }
 
-struct OSDirent {
-    name: [u8; 28],
-    inode_number: u32,
-}
-
-pub unsafe fn sys_getdents(fd:usize, buf: *const u8, count: usize) -> isize {
-    // 读取原有的Dirent
-    let dirent_buf:Vec<DirEntry> = Vec::with_capacity(count);
-    // 不能用已内核中的地址
-    let read = sys_read(fd,dirent_buf.as_ptr() as *const u8,DIRENT_SZ * count);
-    if read <= 0 {
+// buf指向存放OSDirent的缓冲区,
+// count是预读目录项的数目，
+// isize是实际读取的目录项树木,
+// 返回-1表示读取失败
+pub fn sys_getdents(fd:usize, buf: *const OSDirent, count: usize) -> isize {
+    let task = current_task().unwrap();
+    let token = current_user_token();
+    let inner = task.inner_exclusive_access();
+    if fd >= inner.fd_table.len() {
         return -1;
     }
-    let v: Vec<OSDirent> = Vec::from_raw_parts(buf as *mut OSDirent,count,count);
-    for  in  {
-
+    if let Some(file) = &inner.fd_table[fd] {
+        let file = file.clone();
+        if !file.readable() || !file.is_dir() {
+            return -1;
+        }
+        // release current task TCB manually to avoid multi-borrow
+        drop(inner);
+        let res = file.get_dents(count);
+        match res {
+            Some(dents) => {
+                // 把dents复制到buf指向的缓冲区
+                let buf = translated_refmut(token,buf as *mut OSDirent) as *mut OSDirent;
+                let count = dents.len();
+                let mut buf = unsafe{Vec::from_raw_parts(buf,count,count)};
+                let mut i = 0;
+                for dent in dents {
+                    buf[i] = dent;
+                    i += 1;
+                }
+                count as isize
+            }
+            None => {
+                -1
+            }
+        }
+    } else {
+        -1
     }
-    0
 }
 
-pub fn sys_fseek() {
-
+pub fn sys_fseek(fd:usize, offset: usize, whence: usize) -> isize{
+    let task = current_task().unwrap();
+    let inner = task.inner_exclusive_access();
+    if fd >= inner.fd_table.len() {
+        return -1;
+    }
+    if let Some(file) = &inner.fd_table[fd] {
+        let file = file.clone();
+        return if !file.readable() || file.is_dir() {
+            -1
+        } else {
+            file.seek(offset, whence)
+        }
+    }
+    -1
 }
 
 /*

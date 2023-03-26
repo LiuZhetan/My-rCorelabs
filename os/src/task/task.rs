@@ -15,7 +15,7 @@ use alloc::sync::{Weak, Arc};
 use alloc::vec;
 use alloc::vec::Vec;
 use alloc::string::String;
-use crate::fs::{File, Stdin, Stdout};
+use crate::fs::{Fd, Stdin, Stdout};
 
 pub struct TaskControlBlock {
     // immutable
@@ -34,7 +34,8 @@ pub struct TaskControlBlockInner {
     pub parent: Option<Weak<TaskControlBlock>>,
     pub children: Vec<Arc<TaskControlBlock>>,
     pub exit_code: i32,
-    pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    // 对fd_table修改，使得可以使用获取目录项的操作
+    pub fd_table: Vec<Option<Arc<dyn Fd + Send + Sync>>>,
     // 在pcb中增加一条工作路径
     pub current_dir:String,
     // 当前目录的索引编号
@@ -187,7 +188,7 @@ impl TaskControlBlock {
         let kernel_stack = KernelStack::new(&pid_handle);
         let kernel_stack_top = kernel_stack.get_top();
         // copy fd table
-        let mut new_fd_table: Vec<Option<Arc<dyn File + Send + Sync>>> = Vec::new();
+        let mut new_fd_table: Vec<Option<Arc<dyn Fd + Send + Sync>>> = Vec::new();
         for fd in parent_inner.fd_table.iter() {
             if let Some(file) = fd {
                 new_fd_table.push(Some(file.clone()));

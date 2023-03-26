@@ -12,6 +12,12 @@ const SYSCALL_FORK: usize = 220;
 const SYSCALL_EXEC: usize = 221;
 const SYSCALL_WAITPID: usize = 260;
 
+//链接
+const SYSCALL_LINKAT: usize = 37;
+const SYSCALL_UNLINKAT: usize = 35;
+// stat
+const SYSCALL_STAT: usize = 80;
+
 mod fs;
 mod process;
 
@@ -33,6 +39,10 @@ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
         SYSCALL_FORK => sys_fork(),
         SYSCALL_EXEC => sys_exec(args[0] as *const u8, args[1] as *const usize),
         SYSCALL_WAITPID => sys_waitpid(args[0] as isize, args[1] as *mut i32),
+        // 链接
+        SYSCALL_LINKAT => sys_linkat(args[1] as *const u8,args[2] as *const u8),
+        SYSCALL_UNLINKAT => sys_unlinkat(args[1] as *const u8),
+        SYSCALL_STAT => sys_stat(args[0], args[1] as *mut Stat),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }
 }

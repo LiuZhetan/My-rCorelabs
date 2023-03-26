@@ -1,3 +1,4 @@
+use crate::fs::{Directory, Fd};
 use super::File;
 use crate::mm::{UserBuffer};
 use crate::sbi::console_getchar;
@@ -44,4 +45,21 @@ impl File for Stdout {
         }
         user_buf.len()
     }
+}
+
+// 为Stdin和Stdout实现Directory trait
+impl Directory for Stdin {
+    
+}
+
+impl Fd for Stdin {
+
+}
+
+impl Directory for Stdout {
+    
+}
+
+impl Fd for Stdout {
+
 }
